@@ -5,7 +5,6 @@ Drupal.cr = Drupal.cr || {};
 (function ($)  {
   Drupal.behaviors.product_filter = {
     attach: function (context, settings) {
-
       //basepath to site
       var basePath = Drupal.settings.basePath;
       if (basePath == "/"){
@@ -22,6 +21,7 @@ Drupal.cr = Drupal.cr || {};
       Drupal.behaviors.product_filter.hideCalendar();
 
       //The user has selected a reservable item
+      $(item).unbind();
       $(item).mousedown(function() {
         //show the calendar
         Drupal.behaviors.product_filter.showCalendar();
@@ -33,12 +33,19 @@ Drupal.cr = Drupal.cr || {};
         var nid = $(this).find('.nid .field-content').text();
         var pid = $(this).find('.pid .field-content').text(); 
 
+        //Update max reservation time & reservation window
+        Drupal.behaviors.product_filter.updateMaxReservationLimit(nid, pid, 1, basePath);
+        Drupal.behaviors.product_filter.updateReservationWindow(nid, pid, 1, basePath);
+
+        //Add closed times / dates based on this item
+        Drupal.behaviors.product_filter.addClosedDatesTimesToCalendar(nid, pid, 1, basePath);
+
         //Add existing reservations for this item to calendar
         Drupal.behaviors.product_filter.addItemReservationsToCalendar(nid, pid, 1, basePath);
 
         //Render the current selection based on date picker values
         $(".fullcalendar").ajaxStop(function() {
-          Drupal.behaviors.product_filter.addDateSelectionToCalendar();
+          Drupal.behaviors.product_filter.addItemReservationsToCalendar(nid, pid, 1, basePath);
           $(this).unbind("ajaxStop");
         });
 
@@ -85,6 +92,9 @@ Drupal.cr = Drupal.cr || {};
                 $(this).unbind("ajaxStop");
               });
             });
+
+            //fire add date for default values
+            Drupal.behaviors.product_filter.addDateSelectionToCalendar();
           }
       });
     },
@@ -98,7 +108,7 @@ Drupal.cr = Drupal.cr || {};
       startMonth = $('.start-date-wrapper .date-month .form-select').val();
       startMonth = parseInt(startMonth) - 1;
       startDay = $('.start-date-wrapper .date-day .form-select').val();
-      if ($('.start-date-wrapper .date-ampm .form-select').val() == 'pm'){
+      if ($('.start-date-wrapper .date-ampm .form-select').val() == 'pm' && $('.start-date-wrapper .date-hour .form-select').val() != 12){
         startHour = $('.start-date-wrapper .date-hour .form-select').val();
         startHour = parseInt(startHour) + 12;
       } else{
@@ -111,7 +121,7 @@ Drupal.cr = Drupal.cr || {};
       endMonth = $('.end-date-wrapper .date-month .form-select').val();
       endMonth = parseInt(endMonth) - 1;
       endDay = $('.end-date-wrapper .date-day .form-select').val();
-      if ($('.end-date-wrapper .date-ampm .form-select').val() == 'pm'){
+      if ($('.end-date-wrapper .date-ampm .form-select').val() == 'pm' && $('.end-date-wrapper .date-hour .form-select').val() != 12){
         endHour = $('.end-date-wrapper .date-hour .form-select').val();
         endHour = parseInt(endHour) + 12;
       } else{
@@ -174,6 +184,117 @@ Drupal.cr = Drupal.cr || {};
     },
     //end hideItemFields function
 
+    //start updateMaxReservationLimit function
+    updateMaxReservationLimit:function(nid, pid, quantity, basePath) {
+      var basePath = Drupal.settings.basePath;
+      $.ajax(
+      {url : basePath + 'cr/max_hours/' + nid,
+        cache : false,
+        success : function (data) {
+          Drupal.settings.commerce_reservations.maximum_length = parseInt(data);
+        }
+      });
+    },
+    //end updateMaxReservationLimit function
+    
+    //start updateReservationWindow function
+    updateReservationWindow:function(nid, pid, quantity, basePath) {
+      var basePath = Drupal.settings.basePath;
+      $.ajax(
+      {url : basePath + 'cr/res_window/' + nid,
+        cache : false,
+        success : function (data) {
+          Drupal.settings.commerce_reservations.reservation_window = parseInt(data);
+        }
+      });
+    },
+    //end updateReservationWindow function
+
+    //start addClosedDatesTimesToCalendar function
+    addClosedDatesTimesToCalendar:function(nid, pid, quantity, basePath) {
+      $(".fullcalendar").fullCalendar('removeEvents', function(event){
+        if (event.className == 'closed-time' || event.className == 'closed-date' || event.className == 'unavailable-date' || event.className == 'unavailable-time') {
+          return true;
+        }
+      });
+
+      var basePath = Drupal.settings.basePath;
+      $.ajax(
+      {url : basePath + 'closed_times/',
+        cache : false,
+        success : function (data) {
+          counter = 0;
+          $('div.closed-time', data).each(function(index){
+            event = new Object();
+            event.title = 'Closed';
+            event.start = $(this).attr('start');
+            event.end = $(this).attr('end');
+            event.allDay = false;
+            event.className = 'closed-time';
+            event.color = '#56a4da';
+            event.backgroundColor = '#000';
+            event.eventBorderColor = '#00';
+            event.textColor = 'white';
+            dom_id: this.dom_id;
+            $(".fullcalendar").fullCalendar('renderEvent', event, true);
+          });
+
+          $('div.closed_dates', data).each(function(index){
+            event = new Object();
+            event.title = 'Closed';
+            event.start = $(this).attr('date')+' 00:00:00';
+            event.end = $(this).attr('date')+' 23:59:59';
+            event.allDay = false;
+            event.className = 'closed-date';
+            event.color = '#56a4da';
+            event.backgroundColor = '#000';
+            event.eventBorderColor = '#000';
+            event.textColor = 'white';
+            dom_id: this.dom_id;
+            $(".fullcalendar").fullCalendar('renderEvent', event, true);
+          });
+        }
+      });
+
+      $.ajax(
+      {url : basePath + 'closed_times/' + nid,
+        cache : false,
+        success : function (data) {
+          counter = 0;
+          $('div.closed-time', data).each(function(index){
+            event = new Object();
+            event.title = 'Unavailable';
+            event.start = $(this).attr('start');
+            event.end = $(this).attr('end');
+            event.allDay = false;
+            event.className = 'unavailable-time';
+            event.color = '#56a4da';
+            event.backgroundColor = '#3990C9';
+            event.eventBorderColor = '#3990C9';
+            event.textColor = 'white';
+            dom_id: this.dom_id;
+            $(".fullcalendar").fullCalendar('renderEvent', event, true);
+          });
+
+          $('div.closed_dates', data).each(function(index){
+            event = new Object();
+            event.title = 'Unavailable';
+            event.start = $(this).attr('date')+' 00:00:00';
+            event.end = $(this).attr('date')+' 23:59:59';
+            event.allDay = false;
+            event.className = 'unavailable-date';
+            event.color = '#56a4da';
+            event.backgroundColor = '#3990C9';
+            event.eventBorderColor = '#3990C9';
+            event.textColor = 'white';
+            dom_id: this.dom_id;
+            $(".fullcalendar").fullCalendar('renderEvent', event, true);
+          });
+        }
+      });
+    },
+    //end addClosedDatesTimesToCalendar function
+
     //start addItemReservationsToCalendar function
     addItemReservationsToCalendar:function(nid, pid, quantity, basePath) {
       //remove all current events from calendar
@@ -189,6 +310,7 @@ Drupal.cr = Drupal.cr || {};
       //activate preloader on quantity form
       $('.view-footer .form-item-quantity img').show();
       $('.view-footer .date-details').addClass('preloader-active');
+      $('.view-footer input#edit-submit').hide();
 
       //load item reservations
       $.ajax(
@@ -197,24 +319,14 @@ Drupal.cr = Drupal.cr || {};
           success : function (data) {
             $('.view-footer .date-details').removeClass('preloader-active');
             $('.view-footer .form-item-quantity img').hide();
-
-            $('#content #content-inner .no-certification-message').remove();
-            not_cert = $('#not_certified', data);
-            if (not_cert.length > 0){
-              //Hide calendar and display appropriate certificate message
-              Drupal.behaviors.product_filter.notCertifiedMessage();
-
-	            allowCommercial = $('#allow_commercial', data);
-	            if (allowCommercial.length > 0){
-		            $('#content #content-inner').append('<div class = "commercial-message"><p>You may also reserve this item as a commercial rental, at the commercial rates.</p><div class = "commercial-button">Commercial Reservation</div></div>');
-		            $('.commercial-button').mousedown(function(){
-		              $('#left-side .field-name-field-commercial-reservation input').attr('checked', 'checked');
-		              $('.no-certification-message').hide();
-		              $('.commercial-message').hide();
-                  Drupal.behaviors.product_filter.addReservations(data);
-		            });
-	            }
-            } else{
+            $('.view-footer input#edit-submit').show();
+            no_access = $('#no-access', data);
+            $('#content #content-inner .no-access').remove();
+            if (no_access.length > 0) {
+              //Hide calendar and display appropriate message
+              Drupal.behaviors.product_filter.noAccessMessage(no_access);
+            }
+            else {
               Drupal.behaviors.product_filter.addReservations(data);
             }
           }
@@ -235,20 +347,15 @@ Drupal.cr = Drupal.cr || {};
     },
     //end addReservations function
 
-    //start notCertifiedMessage function
-    notCertifiedMessage:function() {
-      logged_in = $('.logged-in');
-      if (logged_in.length > 0){
-        $('#content #content-inner').append('<div class = "no-certification-message"><p>You do not have the proper certifications to reserve this item.</p><a href = "../classes">Take a Class!</a></div>');
-        $('.view-reservation-calendar').css('visibility', 'hidden');
-        $('#content').css('height', 'auto');
-      }  else{
-        $('#content #content-inner').append('<div class = "no-certification-message"><p>You are not logged in as a member. To reserve equipment please login or signup as a member.</p><a href = "../membership">Login or Become a Member!</a></div>');
-        $('.view-reservation-calendar').css('visibility', 'hidden');
-        $('#content').css('height', 'auto');
+    //start noAccessMessage function
+    noAccessMessage:function(no_access) {
+      $('#content #content-inner').append('<div class="no-access"><div class="no-access-message"><p>'+$(no_access).find("#no-access-message").html()+'</p></div></div>');
+      if ($(no_access).find('#no-access-button').length) {
+        $('.no-access').append('<div class="no-access-button">'+$(no_access).find('#no-access-button').html()+'</div>');
       }
+      $('.view-reservation-calendar').css('visibility', 'hidden');
+      $('#content').css('height', 'auto');
     },
-    //end notCertifiedMessage function
 
     //start showItemDetails function
     showItemDetails:function($item) {
@@ -319,14 +426,19 @@ Drupal.cr = Drupal.cr || {};
     this.base = Drupal.cr.calendarEvent;
     this.base(title, start, end);
     this.className = 'overlap';
-    this.backgroundColor = '#912711';
-    this.eventBorderColor = '#912711';
+    this.backgroundColor = '#991314';
+    this.eventBorderColor = '#991314';
     this.textColor = '#fff';
     this.field = $reservation.attr('field'); 
     this.index = $reservation.attr('index');
+
     this.eid = $reservation.attr('eid');
     this.entity_type = $reservation.attr('entity_type');
-    this.url = $reservation.attr('href');
+    if (Drupal.settings.commerce_reservations.staff) {
+      this.url = 'administer_reservations?field_last_name_value=&field_reservation_dates_value%5Bvalue%5D%5Bdate%5D=&field_reservation_dates_value2%5Bvalue%5D%5Bdate%5D=&field_checkout_status_value%5B%5D=Awaiting+Checkout&field_checkout_status_value%5B%5D=No+Show&field_checkout_status_value%5B%5D=Checked+Out&field_checkout_status_value%5B%5D=Checked+In&field_checkout_status_value%5B%5D=Overdue&line_item_id='+$reservation.attr('eid');
+    }else{
+      this.url = $reservation.attr('href');
+    }
     this.className = 'overlap';
     this.editable = true;
     this.color = '#912711';
